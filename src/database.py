@@ -1,6 +1,15 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # IMPORTS
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Database and cryptography libraries for secure data management
+#
+# External libraries:
+# - sqlite3: Database operations
+# - bcrypt: Password hashing with automatic salt
+# - Crypto (PyCryptodome): AES-256 encryption for usernames
+# - cryptography.fernet: Non-deterministic encryption for sensitive data
+# - base64: Encoding for encrypted data storage
+# ═══════════════════════════════════════════════════════════════════════════
 
 import sqlite3
 import bcrypt
@@ -15,13 +24,21 @@ import base64
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 1: CONSTANTS & FILE PATHS
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Configuration paths and default credentials
+#
+# Key components:
+# - DATA_DIR: Directory for database and encryption keys
+# - DB_PATH: SQLite database file location
+# - AES_KEY_PATH: AES-256 key for username encryption (deterministic)
+# - FERNET_KEY_PATH: Fernet key for sensitive data encryption (non-deterministic)
+# - SUPER_ADMIN credentials: Hard-coded admin account (assignment requirement)
+# ═══════════════════════════════════════════════════════════════════════════
 
 DATA_DIR = Path(__file__).parent / "data"
 DB_PATH = DATA_DIR / "declaratieapp.db"
 AES_KEY_PATH = DATA_DIR / "aes_key.bin"
 FERNET_KEY_PATH = DATA_DIR / "fernet_key.bin"
 
-# Hard-coded Super Administrator credentials (assignment requirement)
 SUPER_ADMIN_USERNAME = "super_admin"
 SUPER_ADMIN_PASSWORD = "Admin_123?"
 
@@ -29,12 +46,28 @@ SUPER_ADMIN_PASSWORD = "Admin_123?"
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 2: ENCRYPTION KEY MANAGEMENT
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Load or create encryption keys and username encryption/decryption
+#
+# Key components:
+# - load_or_create_aes_key(): AES-256 key for deterministic username encryption
+# - encrypt_username(): Encrypt username using AES-256 ECB (deterministic)
+# - decrypt_username(): Decrypt username back to plain text
+# - load_or_create_fernet_key(): Fernet key for non-deterministic data encryption
+#
+# Note: AES ECB is deterministic so usernames can be searched with WHERE clauses.
+#       Keys are persisted to disk for consistency across application restarts.
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def load_or_create_aes_key():
     """
     Load or create AES-256 key for deterministic username encryption.
-    Uses ECB mode so usernames can be searched in WHERE clauses.
+
+    Uses ECB mode because usernames need to be searchable in the database
+    (same username must produce same encrypted value for WHERE queries).
+
+    Returns:
+        bytes: 32-byte AES encryption key
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if AES_KEY_PATH.exists():
@@ -53,7 +86,17 @@ aes_key = load_or_create_aes_key()
 
 
 def encrypt_username(username):
-    """Encrypt username using deterministic AES-256 ECB (searchable)."""
+    """
+    Encrypt username using deterministic AES-256 ECB.
+
+    Must be deterministic to allow database lookups (WHERE username = ?).
+
+    Args:
+        username (str): Plain text username
+
+    Returns:
+        str: Base64-encoded encrypted username
+    """
     if username is None or username == "":
         return ""
     cipher = AES.new(aes_key, AES.MODE_ECB)
@@ -63,7 +106,15 @@ def encrypt_username(username):
 
 
 def decrypt_username(encrypted_username):
-    """Decrypt AES-encrypted username back to plain text."""
+    """
+    Decrypt AES-encrypted username back to plain text.
+
+    Args:
+        encrypted_username (str): Base64-encoded encrypted username
+
+    Returns:
+        str: Plain text username
+    """
     if encrypted_username is None or encrypted_username == "":
         return ""
     cipher = AES.new(aes_key, AES.MODE_ECB)
@@ -73,7 +124,15 @@ def decrypt_username(encrypted_username):
 
 
 def load_or_create_fernet_key():
-    """Load or create Fernet key for non-deterministic encryption of sensitive data."""
+    """
+    Load or create Fernet key for encrypting sensitive data.
+
+    Uses non-deterministic encryption (different output each time) for better security.
+    Used for: employee data, claim data, log data.
+
+    Returns:
+        Fernet: Encryption cipher object
+    """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if FERNET_KEY_PATH.exists():
         with open(FERNET_KEY_PATH, "rb") as key_file:
@@ -91,12 +150,32 @@ fernet_cipher = load_or_create_fernet_key()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECTION 3: SENSITIVE DATA ENCRYPTION (Fernet - non-deterministic)
+# SECTION 3: SENSITIVE DATA ENCRYPTION
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Encrypt and decrypt sensitive data (non-searchable fields)
+#
+# Key components:
+# - encrypt_field(): Non-deterministic Fernet encryption for sensitive data
+# - decrypt_field(): Decrypt Fernet-encrypted data back to plain text
+#
+# Encryption strategy:
+# - Used for data that doesn't need direct SQL searching:
+#   employee personal info, claim details, BSN, emails, phones, etc.
+# - Non-deterministic (different output each time) for better security
+# - Cannot be used in WHERE clauses (use AES username encryption for that)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 def encrypt_field(plaintext):
-    """Encrypt field using Fernet (non-deterministic). For data that doesn't need searching."""
+    """
+    Encrypt field using Fernet (non-deterministic, more secure).
+
+    Args:
+        plaintext (str): Plain text value
+
+    Returns:
+        str: Encrypted text
+    """
     if plaintext is None or plaintext == "":
         return ""
     encrypted_bytes = fernet_cipher.encrypt(str(plaintext).encode())
@@ -104,7 +183,15 @@ def encrypt_field(plaintext):
 
 
 def decrypt_field(encrypted_text):
-    """Decrypt Fernet-encrypted field back to plain text."""
+    """
+    Decrypt Fernet-encrypted field back to plain text.
+
+    Args:
+        encrypted_text (str): Encrypted text
+
+    Returns:
+        str: Plain text value
+    """
     if encrypted_text is None or encrypted_text == "":
         return ""
     decrypted_bytes = fernet_cipher.decrypt(encrypted_text.encode())
@@ -112,12 +199,31 @@ def decrypt_field(encrypted_text):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECTION 4: PASSWORD HASHING (bcrypt)
+# SECTION 4: PASSWORD HASHING
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Secure password hashing with bcrypt
+#
+# Key components:
+# - hash_password(): Hash password using bcrypt with automatic salt generation
+# - verify_password(): Verify password against bcrypt hash
+#
+# Note: bcrypt includes random salt in the hash and uses adaptive cost factor
+#       (rounds=12) to remain resistant to brute-force attacks as hardware
+#       improves. Passwords are NEVER stored — only hashes are stored.
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 def hash_password(password, username=None):
-    """Hash password using bcrypt with automatic salt generation."""
+    """
+    Hash password using bcrypt with automatic salt generation.
+
+    Args:
+        password (str): Plain text password
+        username (str): Unused, kept for API compatibility
+
+    Returns:
+        str: Bcrypt hash string (60 characters, starts with $2b$)
+    """
     password_bytes = password.encode('utf-8')
     salt = bcrypt.gensalt(rounds=12)
     hashed = bcrypt.hashpw(password_bytes, salt)
@@ -125,7 +231,17 @@ def hash_password(password, username=None):
 
 
 def verify_password(password, username, stored_hash):
-    """Verify password against bcrypt hash."""
+    """
+    Verify password against bcrypt hash.
+
+    Args:
+        password (str): Plain text password to verify
+        username (str): Unused, kept for API compatibility
+        stored_hash (str): Bcrypt hash from database
+
+    Returns:
+        bool: True if password is correct
+    """
     password_bytes = password.encode('utf-8')
     stored_hash_bytes = stored_hash.encode('utf-8')
     return bcrypt.checkpw(password_bytes, stored_hash_bytes)
@@ -134,10 +250,23 @@ def verify_password(password, username, stored_hash):
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 5: DATABASE CONNECTION
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: SQLite database connection management
+#
+# Key components:
+# - get_connection(): Create SQLite connection with foreign keys enabled
+#
+# Note: Foreign keys are enabled for referential integrity between
+#       users, employees, and claims tables.
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def get_connection():
-    """Create and return a database connection with foreign keys enabled."""
+    """
+    Create and return a database connection with foreign keys enabled.
+
+    Returns:
+        sqlite3.Connection: Database connection
+    """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
@@ -147,17 +276,32 @@ def get_connection():
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 6: TABLE CREATION
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Database schema definition and table creation
+#
+# Key components:
+# - create_tables(): Create all database tables (users, employees, claims)
+#
+# Tables:
+# - users: System users (Super Admin, Manager, Employee) with encrypted
+#          usernames and bcrypt-hashed passwords
+# - employees: Employee personal data with Fernet-encrypted sensitive fields
+#              (name, birthday, address, BSN, identity documents, contact info)
+# - claims: Travel and Home Office expense claims with encrypted fields
+#           (claim date, project number, travel details, approval status)
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def create_tables():
     """
     Create database schema: users, employees, and claims tables.
-    All sensitive fields are encrypted, passwords are hashed.
+
+    All sensitive fields are encrypted with Fernet.
+    Passwords are hashed with bcrypt (never stored in plain text).
+    Usernames are encrypted with AES-256 ECB (deterministic for lookups).
     """
     conn = get_connection()
     cursor = conn.cursor()
 
-    # Users: Super Admin, Managers, Employees (login accounts)
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS users (
@@ -175,7 +319,6 @@ def create_tables():
     """
     )
 
-    # Employees: personal data of CoreStaff Solutions employees
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS employees (
@@ -198,7 +341,6 @@ def create_tables():
     """
     )
 
-    # Claims: travel and home office expense claims
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS claims (
@@ -229,23 +371,34 @@ def create_tables():
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 7: SYSTEM INITIALIZATION
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Initialize database system and default accounts
+#
+# Key components:
+# - init_super_admin(): Create default Super Admin account (hard-coded credentials)
+# - init_database(): Main initialization function (tables + super admin)
+#
+# Note: Called on application startup to ensure system is ready.
+#       Super Admin credentials are intentionally hard-coded per assignment
+#       requirements (super_admin / Admin_123?).
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def init_super_admin():
-    """Create default super admin account if it doesn't exist."""
+    """
+    Create default super admin account if it doesn't exist.
+
+    Credentials: super_admin / Admin_123?
+    This is intentionally insecure (assignment requirement for assessment access).
+    """
     conn = get_connection()
     cursor = conn.cursor()
-
     encrypted_username = encrypt_username(SUPER_ADMIN_USERNAME)
     cursor.execute("SELECT id FROM users WHERE username = ?", (encrypted_username,))
 
     if cursor.fetchone() is None:
         password_hash = hash_password(SUPER_ADMIN_PASSWORD, SUPER_ADMIN_USERNAME)
         cursor.execute(
-            """
-            INSERT INTO users (username, password_hash, role, first_name, last_name)
-            VALUES (?, ?, ?, ?, ?)
-        """,
+            "INSERT INTO users (username, password_hash, role, first_name, last_name) VALUES (?, ?, ?, ?, ?)",
             (encrypted_username, password_hash, "super_admin", "Super", "Administrator"),
         )
         conn.commit()
@@ -254,12 +407,15 @@ def init_super_admin():
         print(f"  Password: {SUPER_ADMIN_PASSWORD}")
     else:
         print(f"✓ Super Admin account already exists")
-
     conn.close()
 
 
 def init_database():
-    """Initialize the complete database system."""
+    """
+    Initialize the complete database system: keys, tables, and super admin.
+
+    Called on application startup.
+    """
     print("=" * 60)
     print("DECLARATIEAPP BACKEND SYSTEM - DATABASE INITIALIZATION")
     print("=" * 60)

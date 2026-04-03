@@ -1,5 +1,16 @@
 # ═══════════════════════════════════════════════════════════════════════════
-# DECLARATIEAPP BACKEND SYSTEM - Main Entry Point
+# IMPORTS
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: All module imports for the DeclaratieApp Backend System UI
+#
+# External libraries: os
+# Internal modules: auth, users, employees, claims, activity_log, backup,
+#                   validation, input_handlers
+#
+# All validation functions are actively used throughout the UI for:
+# - Immediate user input validation with feedback loops
+# - Security protection (null-byte detection, format validation)
+# - Data integrity enforcement before database operations
 # ═══════════════════════════════════════════════════════════════════════════
 
 import os
@@ -38,31 +49,54 @@ from input_handlers import (
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# UTILITY FUNCTIONS
+# SECTION 1: UTILITY FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Helper functions for user interface operations
+#
+# Key components:
+# - clear_screen(): Cross-platform screen clearing
+# - print_header(): Formatted section headers
+# - print_user_info(): Display current logged-in user
+# - wait_for_enter(): Input blocking for user interaction
 # ═══════════════════════════════════════════════════════════════════════════
 
 def clear_screen():
+    """Clear console screen for better UX."""
     os.system("cls" if os.name == "nt" else "clear")
 
 def print_header(title):
+    """Print formatted header."""
     print("\n" + "=" * 70)
     print(f"  {title}")
     print("=" * 70)
 
 def print_user_info():
+    """Print current user information."""
     user = get_current_user()
     if user:
         print(f"\nLogged in as: {user['username']} ({user['role_name']})")
 
 def wait_for_enter():
+    """Wait for user to press Enter."""
     input("\nPress Enter to continue...")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# MAIN MENU
+# SECTION 2: MAIN MENU & NAVIGATION
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Main menu display based on user role
+#
+# Key components:
+# - show_main_menu(): Role-based main menu (Super Admin, Manager, Employee)
+#
+# Roles and their menu options:
+# - Super Admin: Manage Managers, Employees, Claims, Logs, Backup, Profile
+# - Manager: Manage Employees, Claims, Logs, Backup, Profile, Password, Account
+# - Employee: My Claims, Add Claim, Search, Profile, Password
 # ═══════════════════════════════════════════════════════════════════════════
 
 def show_main_menu():
+    """Display main menu based on user role."""
     user = get_current_user()
     if not user:
         return False
@@ -71,6 +105,7 @@ def show_main_menu():
     print_header("DECLARATIEAPP BACKEND SYSTEM")
     print_user_info()
 
+    # Alert for suspicious activities (Manager and Super Admin only)
     suspicious_count = check_suspicious_activities()
     if suspicious_count > 0 and user["role"] in ("super_admin", "manager"):
         print(f"\n⚠️  WARNING: {suspicious_count} unread suspicious activities detected!")
@@ -113,10 +148,18 @@ def show_main_menu():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# MANAGER MANAGEMENT (Super Admin)
+# SECTION 3: MANAGER MANAGEMENT UI (Super Admin only)
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: User interface for managing Manager accounts
+#
+# Key components:
+# - manage_managers_menu(): Manager management submenu
+# - create_manager_ui(): Create new Manager with validation
+# - list_managers_ui(): Display all Managers
 # ═══════════════════════════════════════════════════════════════════════════
 
 def manage_managers_menu():
+    """Menu for managing Managers."""
     while True:
         clear_screen()
         print_header("MANAGE MANAGERS")
@@ -144,8 +187,8 @@ def manage_managers_menu():
         elif choice == "6":
             break
 
-
 def create_manager_ui():
+    """Create new Manager with per-field validation."""
     clear_screen()
     print_header("CREATE NEW MANAGER")
     print("\nUsername: 8-10 chars, start with letter or '_', a-z 0-9 _ ' .")
@@ -162,8 +205,8 @@ def create_manager_ui():
         print("\nCancelled.")
     wait_for_enter()
 
-
 def list_managers_ui():
+    """List all Managers."""
     clear_screen()
     print_header("MANAGERS")
     users = [u for u in list_all_users() if u["role"] == "manager"]
@@ -179,10 +222,21 @@ def list_managers_ui():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# EMPLOYEE DATA MANAGEMENT (Manager / Super Admin)
+# SECTION 4: EMPLOYEE DATA MANAGEMENT UI (Manager / Super Admin)
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: User interface for managing employee personal data
+#
+# Key components:
+# - manage_employees_menu(): Employee data management submenu
+# - add_employee_ui(): Add new employee with complete profile validation
+# - search_employees_ui(): Search employees by partial key
+# - list_employees_ui(): Display all employees
+# - update_employee_ui(): Update employee contact/personal info
+# - delete_employee_ui(): Delete employee with confirmation
 # ═══════════════════════════════════════════════════════════════════════════
 
 def manage_employees_menu():
+    """Menu for managing Employee data."""
     while True:
         clear_screen()
         print_header("MANAGE EMPLOYEES (DATA)")
@@ -210,8 +264,8 @@ def manage_employees_menu():
         elif choice == "6":
             break
 
-
 def add_employee_ui():
+    """Add new employee with per-field validation."""
     clear_screen()
     print_header("ADD NEW EMPLOYEE")
     print("\nEnter employee information (type 'exit' to cancel):")
@@ -240,8 +294,8 @@ def add_employee_ui():
         print("\nCancelled.")
     wait_for_enter()
 
-
 def search_employees_ui():
+    """Search employees with partial key."""
     clear_screen()
     print_header("SEARCH EMPLOYEES")
     try:
@@ -259,8 +313,8 @@ def search_employees_ui():
         print("\nCancelled.")
     wait_for_enter()
 
-
 def list_employees_ui():
+    """List all employees."""
     clear_screen()
     print_header("ALL EMPLOYEES")
     employees = list_all_employees()
@@ -274,8 +328,8 @@ def list_employees_ui():
         print("-" * 70)
     wait_for_enter()
 
-
 def update_employee_ui():
+    """Update employee information."""
     clear_screen()
     print_header("UPDATE EMPLOYEE")
     try:
@@ -315,8 +369,8 @@ def update_employee_ui():
         print("\nCancelled.")
     wait_for_enter()
 
-
 def delete_employee_ui():
+    """Delete employee."""
     clear_screen()
     print_header("DELETE EMPLOYEE")
     try:
@@ -338,10 +392,18 @@ def delete_employee_ui():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# EMPLOYEE USER ACCOUNT MANAGEMENT
+# SECTION 5: EMPLOYEE USER ACCOUNT MANAGEMENT UI
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: User interface for managing Employee login accounts
+#
+# Key components:
+# - manage_employee_accounts_menu(): Employee user accounts submenu
+# - create_employee_user_ui(): Create employee login account
+# - list_employee_users_ui(): List all employee user accounts
 # ═══════════════════════════════════════════════════════════════════════════
 
 def manage_employee_accounts_menu():
+    """Menu for managing Employee user accounts."""
     while True:
         clear_screen()
         print_header("MANAGE EMPLOYEE USER ACCOUNTS")
@@ -366,8 +428,8 @@ def manage_employee_accounts_menu():
         elif choice == "5":
             break
 
-
 def create_employee_user_ui():
+    """Create Employee user account."""
     clear_screen()
     print_header("CREATE EMPLOYEE USER ACCOUNT")
     try:
@@ -385,8 +447,8 @@ def create_employee_user_ui():
         print("\nCancelled.")
     wait_for_enter()
 
-
 def list_employee_users_ui():
+    """List all Employee user accounts."""
     clear_screen()
     print_header("EMPLOYEE USER ACCOUNTS")
     users = [u for u in list_all_users() if u["role"] == "employee"]
@@ -402,10 +464,18 @@ def list_employee_users_ui():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SHARED USER MANAGEMENT UI
+# SECTION 6: SHARED USER MANAGEMENT UI
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Reusable UI functions for user operations
+#
+# Key components:
+# - reset_password_ui(): Reset password for any user role
+# - update_profile_ui(): Update profile for any user role
+# - delete_user_ui(): Delete user with confirmation
 # ═══════════════════════════════════════════════════════════════════════════
 
 def reset_password_ui(role_filter):
+    """Reset user password."""
     clear_screen()
     print_header(f"RESET {role_filter.upper()} PASSWORD")
     try:
@@ -418,8 +488,8 @@ def reset_password_ui(role_filter):
         print("\nCancelled.")
     wait_for_enter()
 
-
 def update_profile_ui(role_filter):
+    """Update user profile."""
     clear_screen()
     print_header(f"UPDATE {role_filter.upper()} PROFILE")
     try:
@@ -440,8 +510,8 @@ def update_profile_ui(role_filter):
         print("\nCancelled.")
     wait_for_enter()
 
-
 def delete_user_ui(role_filter):
+    """Delete user with confirmation."""
     clear_screen()
     print_header(f"DELETE {role_filter.upper()}")
     try:
@@ -457,7 +527,20 @@ def delete_user_ui(role_filter):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# CLAIMS MANAGEMENT
+# SECTION 7: CLAIMS MANAGEMENT UI (Manager / Super Admin)
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: User interface for managing expense claims
+#
+# Key components:
+# - manage_claims_menu(): Claims management submenu
+# - add_claim_ui(): Add new Travel or Home Office claim
+# - search_claims_ui(): Search claims with partial key
+# - list_claims_ui(): Display all claims
+# - approve_claim_ui(): Approve or reject a claim
+# - modify_claim_ui(): Modify project-number or travel-distance
+# - set_salary_batch_ui(): Link claim to salary batch
+# - _display_claims_list(): Helper for displaying search results
+# - _display_claims_table(): Helper for formatted claim table
 # ═══════════════════════════════════════════════════════════════════════════
 
 def manage_claims_menu():
@@ -489,7 +572,6 @@ def manage_claims_menu():
         elif choice == "6":
             break
 
-
 def add_claim_ui():
     """Add claim (Employee)."""
     clear_screen()
@@ -498,7 +580,6 @@ def add_claim_ui():
         claim_date = prompt_with_validation("Claim date (YYYY-MM-DD): ", validate_claim_date)
         project_number = prompt_with_validation("Project number (2-10 digits): ", validate_project_number)
         claim_type = prompt_choice_from_list("Claim type:", ["Travel", "Home Office"])
-
         travel_distance = from_zip = from_house = to_zip = to_house = None
         if claim_type == "Travel":
             travel_distance = prompt_with_validation("Travel distance (km): ", validate_travel_distance)
@@ -506,7 +587,6 @@ def add_claim_ui():
             from_house = prompt_with_validation("From house number: ", validate_house_number)
             to_zip = prompt_with_validation("To ZIP code: ", validate_zipcode)
             to_house = prompt_with_validation("To house number: ", validate_house_number)
-
         success, msg = add_claim(claim_date, project_number, claim_type,
                                  travel_distance, from_zip, from_house, to_zip, to_house)
         print(f"\n{msg}")
@@ -514,8 +594,8 @@ def add_claim_ui():
         print("\nCancelled.")
     wait_for_enter()
 
-
 def search_claims_ui(employee_filter=None):
+    """Search claims with partial key."""
     clear_screen()
     print_header("SEARCH CLAIMS")
     try:
@@ -526,8 +606,8 @@ def search_claims_ui(employee_filter=None):
         print("\nCancelled.")
     wait_for_enter()
 
-
 def list_claims_ui(employee_filter=None):
+    """List all claims."""
     clear_screen()
     print_header("ALL CLAIMS")
     claims_list = list_claims(employee_id_filter=employee_filter)
@@ -538,16 +618,16 @@ def list_claims_ui(employee_filter=None):
         _display_claims_table(claims_list)
     wait_for_enter()
 
-
 def _display_claims_list(results, search_key):
+    """Display search results."""
     if not results:
         print(f"\nNo claims found matching '{search_key}'.")
     else:
         print(f"\nFound {len(results)} claim(s):")
         _display_claims_table(results)
 
-
 def _display_claims_table(claims_list):
+    """Display formatted claims table."""
     print("-" * 100)
     for c in claims_list:
         print(f"ID: {c['id']} | Date: {c['claim_date']} | Type: {c['claim_type']} | "
@@ -558,8 +638,8 @@ def _display_claims_table(claims_list):
                   f"To: {c['to_zip_code']} {c['to_house_number']}")
     print("-" * 100)
 
-
 def approve_claim_ui():
+    """Approve or reject a claim."""
     clear_screen()
     print_header("APPROVE/REJECT CLAIM")
     try:
@@ -577,8 +657,8 @@ def approve_claim_ui():
         print("\nCancelled.")
     wait_for_enter()
 
-
 def modify_claim_ui():
+    """Modify claim project-number or travel-distance."""
     clear_screen()
     print_header("MODIFY CLAIM")
     try:
@@ -605,8 +685,8 @@ def modify_claim_ui():
         print("\nCancelled.")
     wait_for_enter()
 
-
 def set_salary_batch_ui():
+    """Set salary batch for a claim."""
     clear_screen()
     print_header("SET SALARY BATCH")
     try:
@@ -626,10 +706,21 @@ def set_salary_batch_ui():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# EMPLOYEE CLAIMS (Employee role)
+# SECTION 8: EMPLOYEE CLAIMS UI (Employee role)
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: User interface for employees managing their own claims
+#
+# Key components:
+# - my_claims_ui(): List employee's own claims
+# - search_my_claims_ui(): Search employee's own claims
+# - update_my_claim_ui(): Update own claim (if not linked to salary-batch)
+#
+# Note: Employees can only see and modify their own claims.
+#       Claims linked to a salary-batch cannot be modified or deleted.
 # ═══════════════════════════════════════════════════════════════════════════
 
 def my_claims_ui():
+    """List employee's own claims."""
     user = get_current_user()
     if not user or not user.get("employee_id"):
         print("\nYour account is not linked to an employee record.")
@@ -637,15 +728,14 @@ def my_claims_ui():
         return
     list_claims_ui(employee_filter=user["employee_id"])
 
-
 def search_my_claims_ui():
+    """Search employee's own claims."""
     user = get_current_user()
     if not user or not user.get("employee_id"):
         print("\nYour account is not linked to an employee record.")
         wait_for_enter()
         return
     search_claims_ui(employee_filter=user["employee_id"])
-
 
 def update_my_claim_ui():
     """Employee updates own claim."""
@@ -668,7 +758,7 @@ def update_my_claim_ui():
             wait_for_enter()
             return
         if claim["salary_batch"]:
-            print("\nCannot modify - claim is linked to a salary batch.")
+            print("\nCannot modify — claim is linked to a salary batch.")
             wait_for_enter()
             return
         print(f"\nCurrent: Date={claim['claim_date']}, Project={claim['project_number']}, Type={claim['claim_type']}")
@@ -690,10 +780,19 @@ def update_my_claim_ui():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# LOGS UI
+# SECTION 9: SYSTEM LOGS UI
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: User interface for viewing encrypted system activity logs
+#
+# Key components:
+# - view_logs_menu(): Logs viewing submenu
+#
+# Note: Logs are encrypted and only readable through the system interface.
+#       Viewing logs marks them as read (resets unread suspicious count).
 # ═══════════════════════════════════════════════════════════════════════════
 
 def view_logs_menu():
+    """View system logs menu."""
     while True:
         clear_screen()
         print_header("SYSTEM LOGS")
@@ -723,10 +822,23 @@ def view_logs_menu():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# BACKUP & RESTORE UI
+# SECTION 10: BACKUP & RESTORE UI
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: User interface for backup and disaster recovery
+#
+# Key components:
+# - backup_restore_menu(): Backup/restore submenu with role-based options
+# - restore_backup_ui(): Restore from backup (code validation for Managers)
+# - generate_restore_code_ui(): Generate one-time restore code (Super Admin)
+# - revoke_restore_code_ui(): Revoke unused restore code (Super Admin)
+#
+# Note: Super Admin has full access and restores directly.
+#       Manager needs one-use restore code (linked to specific backup + manager).
+#       Super Admin cannot use restore codes — only generate/revoke them.
 # ═══════════════════════════════════════════════════════════════════════════
 
 def backup_restore_menu():
+    """Backup and restore menu."""
     user = get_current_user()
     while True:
         clear_screen()
@@ -781,8 +893,8 @@ def backup_restore_menu():
         elif choice == str(max_choice):
             break
 
-
 def restore_backup_ui():
+    """Restore from backup."""
     user = get_current_user()
     backups = list_backups()
     if not backups:
@@ -800,11 +912,9 @@ def restore_backup_ui():
         print("\nInvalid choice.")
         wait_for_enter()
         return
-
     restore_code = None
     if user and user["role"] == "manager":
         restore_code = input("Enter restore code: ")
-
     if prompt_confirmation(f"\n⚠️  Restore from '{backup_fn}'? This overwrites current data. (yes/no): "):
         success, msg = restore_backup(backup_fn, restore_code)
         print(f"\n{msg}")
@@ -812,8 +922,8 @@ def restore_backup_ui():
         print("\nCancelled.")
     wait_for_enter()
 
-
 def generate_restore_code_ui():
+    """Generate restore code (Super Admin only)."""
     backups = list_backups()
     if not backups:
         print("\nNo backups.")
@@ -834,8 +944,8 @@ def generate_restore_code_ui():
         print("\nCancelled.")
     wait_for_enter()
 
-
 def revoke_restore_code_ui():
+    """Revoke restore code (Super Admin only)."""
     codes = list_restore_codes()
     if not codes:
         print("\nNo active codes.")
@@ -856,10 +966,21 @@ def revoke_restore_code_ui():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# PROFILE & PASSWORD
+# SECTION 11: PROFILE & PASSWORD MANAGEMENT UI
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: User interface for viewing/managing own profile and password
+#
+# Key components:
+# - view_my_profile_ui(): Display current user's profile
+# - update_my_password_ui(): Change own password (old + new + confirm)
+# - force_password_change_ui(): Force change on first login with temp password
+#
+# Note: Super Admin password cannot be changed (hard-coded per assignment).
+#       All other users must change their temporary password on first login.
 # ═══════════════════════════════════════════════════════════════════════════
 
 def view_my_profile_ui():
+    """Display current user's profile information."""
     clear_screen()
     print_header("MY PROFILE")
     user = get_current_user()
@@ -875,8 +996,8 @@ def view_my_profile_ui():
         print(f"{'Employee ID:':<20} {user['employee_id']}")
     wait_for_enter()
 
-
 def update_my_password_ui():
+    """Update current user's password."""
     clear_screen()
     print_header("UPDATE MY PASSWORD")
     print("\nPassword: 12-50 chars, 1 lower, 1 upper, 1 digit, 1 special char")
@@ -893,8 +1014,8 @@ def update_my_password_ui():
         print("\nCancelled.")
     wait_for_enter()
 
-
 def force_password_change_ui():
+    """Force user to change password on first login with temporary password."""
     clear_screen()
     print_header("⚠️  PASSWORD CHANGE REQUIRED")
     print("\nYou must change your temporary password before continuing.")
@@ -904,7 +1025,7 @@ def force_password_change_ui():
         user = get_current_user()
         if not user:
             return
-        from database import get_connection
+        from database import get_connection, hash_password
         conn = get_connection()
         cursor = conn.cursor()
         new_hash = hash_password(new_pw, user["username"])
@@ -922,10 +1043,25 @@ def force_password_change_ui():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# LOGIN SCREEN
+# SECTION 12: LOGIN SCREEN & MAIN PROGRAM LOOP
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Main application entry point and program flow control
+#
+# Key components:
+# - login_screen(): User login interface with credential validation
+# - main(): Main program loop (initialization → login → menu routing → logout)
+#
+# Program flow:
+# 1. Initialize database and system
+# 2. Display login screen (with hard-coded Super Admin credentials shown)
+# 3. Force password change if using temporary password
+# 4. Show role-based main menu
+# 5. Route to appropriate submenu based on user choice and role
+# 6. Handle logout and restart loop
 # ═══════════════════════════════════════════════════════════════════════════
 
 def login_screen():
+    """Login screen."""
     clear_screen()
     print_header("DECLARATIEAPP BACKEND SYSTEM - LOGIN")
     print("\n" + "=" * 70)
@@ -933,20 +1069,17 @@ def login_screen():
     print("  Username: super_admin")
     print("  Password: Admin_123?")
     print("=" * 70)
-
     try:
         username = prompt_with_validation("\nUsername: ", validate_nonempty, allow_exit=False)
     except ValidationError:
         print("\n❌ Invalid credentials")
         wait_for_enter()
         return False
-
     password = input("Password: ")
     if not password:
         print("\n❌ Invalid credentials")
         wait_for_enter()
         return False
-
     success, message = login(username, password)
     if success:
         print(f"\n✓ {message}")
@@ -960,25 +1093,19 @@ def login_screen():
         wait_for_enter()
         return False
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# MAIN PROGRAM LOOP
-# ═══════════════════════════════════════════════════════════════════════════
-
 def main():
+    """Main program loop."""
     print("\n" + "=" * 70)
     print("  DECLARATIEAPP BACKEND SYSTEM")
     print("  Software Quality - Analysis 8")
     print("=" * 70)
     print("\nInitializing system...")
-
     try:
         from database import init_database
         init_database()
     except Exception as e:
         print(f"❌ Error: {e}")
         return
-
     print("✓ System ready")
     wait_for_enter()
 
@@ -996,7 +1123,6 @@ def main():
                 break
             if not show_main_menu():
                 break
-
             choice = input("\nEnter choice: ").strip()
 
             if user["role"] == "super_admin":

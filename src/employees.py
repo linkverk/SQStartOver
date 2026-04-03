@@ -1,6 +1,10 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # IMPORTS
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Employee data management imports
+#
+# External modules: database, validation, auth, activity_log
+# ═══════════════════════════════════════════════════════════════════════════
 
 from database import get_connection, encrypt_field, decrypt_field
 from validation import (
@@ -14,7 +18,17 @@ from activity_log import log_activity
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECTION 1: CREATE EMPLOYEE
+# SECTION 1: CREATE OPERATIONS
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Add new employees to the system
+#
+# Key components:
+# - add_employee(): Create new employee record with full validation and encryption
+#
+# Note: Employee ID and registration date are automatically generated.
+#       All sensitive fields are encrypted with Fernet before storage.
+#       Employee data includes: name, birthday, gender, address, email, phone,
+#       identity document (Passport/ID-Card), BSN number.
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -23,14 +37,37 @@ def add_employee(first_name, last_name, birthday, gender, street_name, house_num
                  identity_doc_number, bsn):
     """
     Register a new employee in the system.
+
     Employee ID and registration date are auto-generated.
     Sensitive fields are encrypted with Fernet.
+
+    Args:
+        first_name (str): Employee's given name
+        last_name (str): Employee's family name
+        birthday (str): Date of birth (DD-MM-YYYY)
+        gender (str): Male or Female
+        street_name (str): Street name
+        house_number (str): House number (digits only)
+        zip_code (str): Postal code (DDDDXX)
+        city (str): City (from predefined list)
+        email (str): Email address
+        mobile_phone (str): Mobile phone (8 digits, auto-formatted to +31-6-DDDDDDDD)
+        identity_doc_type (str): Passport or ID-Card
+        identity_doc_number (str): XXDDDDDDD or XDDDDDDDD
+        bsn (str): BSN number (9 digits)
+
+    Returns:
+        tuple: (success: bool, message: str, employee_id: str or None)
+
+    Example:
+        success, msg, emp_id = add_employee("Jan", "de Vries", "15-03-1990", "Male", ...)
     """
     if not check_permission("manage_employees"):
         return False, "Access denied. Insufficient permissions to add employees", None
 
     current_user = get_current_user()
 
+    # Validate all inputs (whitelisting approach)
     try:
         first_name = validate_name(first_name, "First name")
         last_name = validate_name(last_name, "Last name")
@@ -48,7 +85,7 @@ def add_employee(first_name, last_name, birthday, gender, street_name, house_num
     except ValidationError as e:
         return False, f"Validation error: {e}", None
 
-    # Encrypt sensitive fields
+    # Encrypt all sensitive fields with Fernet (non-deterministic)
     enc_first_name = encrypt_field(first_name)
     enc_last_name = encrypt_field(last_name)
     enc_birthday = encrypt_field(birthday)
@@ -66,6 +103,7 @@ def add_employee(first_name, last_name, birthday, gender, street_name, house_num
     conn = get_connection()
     cursor = conn.cursor()
 
+    # Prepared statement to prevent SQL injection
     cursor.execute(
         """
         INSERT INTO employees (first_name, last_name, birthday, gender,
@@ -89,12 +127,34 @@ def add_employee(first_name, last_name, birthday, gender, street_name, house_num
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECTION 2: UPDATE EMPLOYEE
+# SECTION 2: UPDATE OPERATIONS
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Update existing employee information
+#
+# Key components:
+# - update_employee(): Update employee fields with validation and re-encryption
+#
+# Note: All updated fields are validated and re-encrypted before storage.
+#       Uses prepared statements to prevent SQL injection.
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 def update_employee(employee_id, **updates):
-    """Update employee information. All updated fields are re-encrypted."""
+    """
+    Update employee information.
+
+    Validates inputs, encrypts updated fields, uses prepared statements.
+
+    Args:
+        employee_id (str): Employee ID to update
+        **updates: Fields to update (e.g., email="new@email.com")
+
+    Returns:
+        tuple: (success: bool, message: str)
+
+    Example:
+        success, msg = update_employee("1", email="newemail@example.com", city="Rotterdam")
+    """
     if not check_permission("manage_employees"):
         return False, "Access denied. Insufficient permissions to update employees"
 
@@ -104,6 +164,8 @@ def update_employee(employee_id, **updates):
 
     conn = get_connection()
     cursor = conn.cursor()
+
+    # Prepared statement
     cursor.execute("SELECT * FROM employees WHERE id = ?", (int(employee_id),))
     employee = cursor.fetchone()
     if not employee:
@@ -124,6 +186,8 @@ def update_employee(employee_id, **updates):
         if field not in allowed_fields:
             conn.close()
             return False, f"Invalid field: {field}"
+
+        # Validate each field using whitelisting
         try:
             if field in ["first_name", "last_name"]:
                 value = validate_name(value, field.replace("_", " ").title())
@@ -153,13 +217,17 @@ def update_employee(employee_id, **updates):
             conn.close()
             return False, f"Validation error for {field}: {e}"
 
+        # Re-encrypt the validated value
         encrypted_value = encrypt_field(value)
         update_fields.append(f"{field} = ?")
         params.append(encrypted_value)
         changes.append(field)
 
     params.append(int(employee_id))
-    cursor.execute(f"UPDATE employees SET {', '.join(update_fields)} WHERE id = ?", tuple(params))
+
+    # Prepared statement for UPDATE
+    cursor.execute(f"UPDATE employees SET {', '.join(update_fields)} WHERE id = ?",
+                   tuple(params))
     conn.commit()
     conn.close()
 
@@ -170,12 +238,31 @@ def update_employee(employee_id, **updates):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECTION 3: DELETE EMPLOYEE
+# SECTION 3: DELETE OPERATIONS
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Delete employee records
+#
+# Key components:
+# - delete_employee(): Remove employee from system
+#
+# Note: Deleting an employee also cascades to related claims (ON DELETE CASCADE).
+#       Uses prepared statements to prevent SQL injection.
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 def delete_employee(employee_id):
-    """Delete employee record."""
+    """
+    Delete employee record.
+
+    Args:
+        employee_id (str): Employee ID to delete
+
+    Returns:
+        tuple: (success: bool, message: str)
+
+    Example:
+        success, msg = delete_employee("1")
+    """
     if not check_permission("manage_employees"):
         return False, "Access denied. Insufficient permissions to delete employees"
 
@@ -183,7 +270,9 @@ def delete_employee(employee_id):
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT first_name, last_name FROM employees WHERE id = ?", (int(employee_id),))
+    # Prepared statement
+    cursor.execute("SELECT first_name, last_name FROM employees WHERE id = ?",
+                   (int(employee_id),))
     employee = cursor.fetchone()
     if not employee:
         conn.close()
@@ -193,6 +282,7 @@ def delete_employee(employee_id):
     first_name = decrypt_field(enc_first)
     last_name = decrypt_field(enc_last)
 
+    # Prepared statement for DELETE
     cursor.execute("DELETE FROM employees WHERE id = ?", (int(employee_id),))
     conn.commit()
     conn.close()
@@ -204,12 +294,33 @@ def delete_employee(employee_id):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECTION 4: SEARCH & RETRIEVAL
+# SECTION 4: SEARCH & RETRIEVAL OPERATIONS
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Search and retrieve employee information
+#
+# Key components:
+# - _decrypt_employee_row(): Internal helper to decrypt all fields in a row
+# - search_employees(): Partial key search across all decrypted fields
+# - get_employee_by_id(): Get specific employee by ID
+# - list_all_employees(): Get all employees with decrypted data
+#
+# Note: Since all employee data is Fernet-encrypted (non-deterministic),
+#       searching requires decrypting all records and filtering in Python.
+#       This supports the partial key search requirement (Note 2 in assignment):
+#       e.g., searching "1218", "18 A", or "AK" for zip "1218 AK".
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 def _decrypt_employee_row(row):
-    """Decrypt all encrypted fields in an employee row."""
+    """
+    Decrypt all encrypted fields in an employee database row.
+
+    Args:
+        row (tuple): Raw database row (15 columns)
+
+    Returns:
+        dict: Employee data with all fields decrypted
+    """
     return {
         "id": row[0],
         "first_name": decrypt_field(row[1]),
@@ -232,8 +343,20 @@ def _decrypt_employee_row(row):
 def search_employees(search_key):
     """
     Search employees with partial key matching.
+
     Since all data is encrypted, we must decrypt all records and filter in Python.
-    Accepts partial keys (e.g. "1218", "18 A", "AK" for zip "1218 AK").
+    Accepts partial keys (e.g., "1218", "18 A", or "AK" for zip "1218 AK").
+
+    Args:
+        search_key (str): Search term (partial match)
+
+    Returns:
+        list: Matching employee dictionaries
+
+    Example:
+        results = search_employees("jan")     # Finds "Jan", "Jansen", etc.
+        results = search_employees("3011")    # Finds zip codes containing "3011"
+        results = search_employees("123456")  # Finds BSN or doc numbers
     """
     if not search_key or len(search_key) < 1:
         return []
@@ -249,7 +372,7 @@ def search_employees(search_key):
     matches = []
     for row in results:
         emp = _decrypt_employee_row(row)
-        # Search across all decrypted text fields
+        # Build searchable string from all decrypted text fields
         searchable = " ".join([
             str(emp["id"]),
             emp["first_name"], emp["last_name"], emp["birthday"],
@@ -265,22 +388,47 @@ def search_employees(search_key):
 
 
 def get_employee_by_id(employee_id):
-    """Get specific employee by ID."""
+    """
+    Get specific employee by ID.
+
+    Args:
+        employee_id (str or int): Employee ID
+
+    Returns:
+        dict: Employee information, or None if not found
+
+    Example:
+        employee = get_employee_by_id("1")
+    """
     conn = get_connection()
     cursor = conn.cursor()
+
+    # Prepared statement
     cursor.execute("SELECT * FROM employees WHERE id = ?", (int(employee_id),))
     row = cursor.fetchone()
     conn.close()
+
     if not row:
         return None
     return _decrypt_employee_row(row)
 
 
 def list_all_employees():
-    """Get all employees with decrypted data."""
+    """
+    Get all employees with decrypted data.
+
+    Returns:
+        list: List of employee dictionaries
+
+    Example:
+        employees = list_all_employees()
+        for emp in employees:
+            print(f"{emp['first_name']} {emp['last_name']} - {emp['city']}")
+    """
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM employees ORDER BY id")
     results = cursor.fetchall()
     conn.close()
+
     return [_decrypt_employee_row(row) for row in results]

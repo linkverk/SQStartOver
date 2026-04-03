@@ -1,6 +1,10 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # IMPORTS
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Expense claim management imports
+#
+# External modules: database, validation, auth, activity_log
+# ═══════════════════════════════════════════════════════════════════════════
 
 from database import get_connection, encrypt_field, decrypt_field
 from validation import (
@@ -13,12 +17,28 @@ from activity_log import log_activity
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# HELPER: decrypt claim row
+# SECTION 1: INTERNAL HELPERS
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Internal helper functions for claim data processing
+#
+# Key components:
+# - _decrypt_claim_row(): Decrypt all encrypted fields in a claim database row
+#
+# Note: All claim fields (except id, employee_id, created_at) are encrypted
+#       with Fernet. This helper decrypts them for display and search.
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 def _decrypt_claim_row(row):
-    """Decrypt all encrypted fields in a claim row."""
+    """
+    Decrypt all encrypted fields in a claim database row.
+
+    Args:
+        row (tuple): Raw database row (14 columns)
+
+    Returns:
+        dict: Claim data with all fields decrypted
+    """
     return {
         "id": row[0],
         "claim_date": decrypt_field(row[1]),
@@ -38,7 +58,17 @@ def _decrypt_claim_row(row):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECTION 1: ADD CLAIM (Employee)
+# SECTION 2: ADD CLAIM
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Create new expense claims
+#
+# Key components:
+# - add_claim(): Add Travel or Home Office claim
+#
+# Note: Employee ID is set automatically from the logged-in user's session.
+#       If claim_type is 'Travel', travel-specific fields are required
+#       (distance, from/to ZIP+housenumber). 'Home Office' needs no extras.
+#       All fields are encrypted before storage. Initial status is 'Pending'.
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -47,16 +77,31 @@ def add_claim(claim_date, project_number, claim_type, travel_distance=None,
               to_house_number=None):
     """
     Add a new claim. Employee ID is set automatically from session.
-    If claim_type is 'Travel', travel fields are required.
+
+    Args:
+        claim_date (str): Claim date (YYYY-MM-DD, max 2 months back / 14 days ahead)
+        project_number (str): Project number (2-10 digits)
+        claim_type (str): 'Travel' or 'Home Office'
+        travel_distance (str): Km travelled (required for Travel)
+        from_zip_code (str): Start ZIP code (required for Travel)
+        from_house_number (str): Start house number (required for Travel)
+        to_zip_code (str): Destination ZIP code (required for Travel)
+        to_house_number (str): Destination house number (required for Travel)
+
+    Returns:
+        tuple: (success: bool, message: str)
+
+    Example:
+        success, msg = add_claim("2026-04-01", "12345", "Travel", "50",
+                                  "3011AB", "42", "1017AB", "10")
     """
     current_user = get_current_user()
     if not current_user:
         return False, "You must be logged in to add claims"
 
-    # Employees submit their own claims; managers/admins can also add
+    # Permission check: employees submit, managers/admins manage
     if current_user["role"] == "employee" and not check_permission("submit_claims"):
         return False, "Access denied"
-
     if current_user["role"] in ("manager", "super_admin") and not check_permission("manage_claims"):
         return False, "Access denied"
 
@@ -64,6 +109,7 @@ def add_claim(claim_date, project_number, claim_type, travel_distance=None,
     if current_user["role"] == "employee" and not employee_id:
         return False, "Your account is not linked to an employee record"
 
+    # Validate all inputs (whitelisting approach)
     try:
         claim_date = validate_claim_date(claim_date)
         project_number = validate_project_number(project_number)
@@ -98,6 +144,7 @@ def add_claim(claim_date, project_number, claim_type, travel_distance=None,
     except ValidationError as e:
         return False, f"Validation error: {e}"
 
+    # Encrypt remaining fields
     enc_claim_date = encrypt_field(claim_date)
     enc_project_number = encrypt_field(project_number)
     enc_claim_type = encrypt_field(claim_type)
@@ -105,6 +152,8 @@ def add_claim(claim_date, project_number, claim_type, travel_distance=None,
 
     conn = get_connection()
     cursor = conn.cursor()
+
+    # Prepared statement to prevent SQL injection
     cursor.execute(
         """
         INSERT INTO claims (claim_date, project_number, employee_id, claim_type,
@@ -126,15 +175,39 @@ def add_claim(claim_date, project_number, claim_type, travel_distance=None,
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECTION 2: UPDATE CLAIM
+# SECTION 3: UPDATE CLAIM
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Modify existing claims with role-based field restrictions
+#
+# Key components:
+# - update_claim(): Update claim with role-based permissions
+#
+# Employee can update own claims (if not linked to salary-batch):
+# - claim_date, project_number, claim_type, travel fields
+#
+# Manager / Super Admin can update:
+# - project_number, travel_distance (modify claim details)
+# - approved (Approved/Rejected — sets approved_by automatically)
+# - salary_batch (link to salary processing)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 def update_claim(claim_id, **updates):
     """
-    Update a claim.
-    Employee: can update own claims if not linked to salary-batch.
-    Manager/Super Admin: can update project_number, travel_distance, approve, salary_batch.
+    Update a claim with role-based field restrictions.
+
+    Args:
+        claim_id (str or int): Claim ID to update
+        **updates: Fields to update
+
+    Returns:
+        tuple: (success: bool, message: str)
+
+    Example:
+        # Manager approves claim
+        success, msg = update_claim(1, approved="Approved")
+        # Employee updates own claim date
+        success, msg = update_claim(1, claim_date="2026-04-05")
     """
     current_user = get_current_user()
     if not current_user:
@@ -142,6 +215,8 @@ def update_claim(claim_id, **updates):
 
     conn = get_connection()
     cursor = conn.cursor()
+
+    # Prepared statement
     cursor.execute("SELECT * FROM claims WHERE id = ?", (int(claim_id),))
     row = cursor.fetchone()
     if not row:
@@ -177,6 +252,7 @@ def update_claim(claim_id, **updates):
             conn.close()
             return False, f"You cannot update field: {field}"
 
+        # Validate using whitelisting
         try:
             if field == "claim_date":
                 value = validate_claim_date(value)
@@ -203,7 +279,7 @@ def update_claim(claim_id, **updates):
         params.append(encrypted_value)
         changes.append(field)
 
-    # If approving/rejecting, also set approved_by automatically
+    # Auto-set approved_by when manager approves/rejects
     if "approved" in updates and current_user["role"] in ("manager", "super_admin"):
         update_fields.append("approved_by = ?")
         params.append(encrypt_field(current_user["username"]))
@@ -213,7 +289,10 @@ def update_claim(claim_id, **updates):
         return False, "No fields to update"
 
     params.append(int(claim_id))
-    cursor.execute(f"UPDATE claims SET {', '.join(update_fields)} WHERE id = ?", tuple(params))
+
+    # Prepared statement for UPDATE
+    cursor.execute(f"UPDATE claims SET {', '.join(update_fields)} WHERE id = ?",
+                   tuple(params))
     conn.commit()
     conn.close()
 
@@ -223,18 +302,41 @@ def update_claim(claim_id, **updates):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECTION 3: DELETE CLAIM (Employee only, if not batched)
+# SECTION 4: DELETE CLAIM
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Delete expense claims
+#
+# Key components:
+# - delete_claim(): Remove claim (Employee only if not batched)
+#
+# Note: Employee can only delete own claims that are not yet linked to
+#       a salary batch. Uses prepared statements to prevent SQL injection.
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 def delete_claim(claim_id):
-    """Delete a claim. Employee can only delete own claims not linked to salary-batch."""
+    """
+    Delete a claim.
+
+    Employee can only delete own claims not linked to salary-batch.
+
+    Args:
+        claim_id (str or int): Claim ID to delete
+
+    Returns:
+        tuple: (success: bool, message: str)
+
+    Example:
+        success, msg = delete_claim(1)
+    """
     current_user = get_current_user()
     if not current_user:
         return False, "You must be logged in to delete claims"
 
     conn = get_connection()
     cursor = conn.cursor()
+
+    # Prepared statement
     cursor.execute("SELECT * FROM claims WHERE id = ?", (int(claim_id),))
     row = cursor.fetchone()
     if not row:
@@ -243,6 +345,7 @@ def delete_claim(claim_id):
 
     claim = _decrypt_claim_row(row)
 
+    # Employee restrictions
     if current_user["role"] == "employee":
         if claim["employee_id"] != current_user.get("employee_id"):
             conn.close()
@@ -251,6 +354,7 @@ def delete_claim(claim_id):
             conn.close()
             return False, "Cannot delete claim that is already linked to a salary batch"
 
+    # Prepared statement for DELETE
     cursor.execute("DELETE FROM claims WHERE id = ?", (int(claim_id),))
     conn.commit()
     conn.close()
@@ -260,15 +364,40 @@ def delete_claim(claim_id):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECTION 4: SEARCH & RETRIEVAL
+# SECTION 5: SEARCH & RETRIEVAL OPERATIONS
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Search and retrieve claim information
+#
+# Key components:
+# - search_claims(): Partial key search across all decrypted claim fields
+# - get_claim_by_id(): Get specific claim by ID
+# - list_claims(): List all claims, optionally filtered by employee ID
+#
+# Note: Since all claim data is Fernet-encrypted (non-deterministic),
+#       searching requires decrypting all records and filtering in Python.
+#       This supports the partial key search requirement (Note 2 in assignment):
+#       e.g., searching "1218", "18 A", or "AK" for zip code "1218AK".
+#       Employee role can only see their own claims (employee_id_filter).
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 def search_claims(search_key, employee_id_filter=None):
     """
     Search claims with partial key matching.
-    Decrypts all claims and searches across fields.
-    employee_id_filter: if set, only show claims for that employee (for Employee role).
+
+    Decrypts all claims and searches across all fields.
+    Supports partial key matching per assignment Note 2.
+
+    Args:
+        search_key (str): Search term (partial match)
+        employee_id_filter (int): If set, only show claims for that employee
+
+    Returns:
+        list: Matching claim dictionaries
+
+    Example:
+        results = search_claims("Travel")           # Find all travel claims
+        results = search_claims("3011", employee_id_filter=1)  # Employee's claims with ZIP 3011
     """
     if not search_key or len(search_key) < 1:
         return []
@@ -277,16 +406,21 @@ def search_claims(search_key, employee_id_filter=None):
 
     conn = get_connection()
     cursor = conn.cursor()
+
     if employee_id_filter:
-        cursor.execute("SELECT * FROM claims WHERE employee_id = ? ORDER BY id DESC", (int(employee_id_filter),))
+        # Prepared statement with employee filter
+        cursor.execute("SELECT * FROM claims WHERE employee_id = ? ORDER BY id DESC",
+                       (int(employee_id_filter),))
     else:
         cursor.execute("SELECT * FROM claims ORDER BY id DESC")
+
     results = cursor.fetchall()
     conn.close()
 
     matches = []
     for row in results:
         claim = _decrypt_claim_row(row)
+        # Build searchable string from all decrypted fields
         searchable = " ".join([
             str(claim["id"]), claim["claim_date"], claim["project_number"],
             str(claim["employee_id"]), claim["claim_type"], claim["travel_distance"],
@@ -301,25 +435,56 @@ def search_claims(search_key, employee_id_filter=None):
 
 
 def get_claim_by_id(claim_id):
-    """Get specific claim by ID."""
+    """
+    Get specific claim by ID.
+
+    Args:
+        claim_id (str or int): Claim ID
+
+    Returns:
+        dict: Claim information, or None if not found
+
+    Example:
+        claim = get_claim_by_id(1)
+    """
     conn = get_connection()
     cursor = conn.cursor()
+
+    # Prepared statement
     cursor.execute("SELECT * FROM claims WHERE id = ?", (int(claim_id),))
     row = cursor.fetchone()
     conn.close()
+
     if not row:
         return None
     return _decrypt_claim_row(row)
 
 
 def list_claims(employee_id_filter=None):
-    """List all claims, optionally filtered by employee ID."""
+    """
+    List all claims, optionally filtered by employee ID.
+
+    Args:
+        employee_id_filter (int): If set, only show claims for that employee
+
+    Returns:
+        list: List of claim dictionaries
+
+    Example:
+        all_claims = list_claims()
+        my_claims = list_claims(employee_id_filter=1)
+    """
     conn = get_connection()
     cursor = conn.cursor()
+
     if employee_id_filter:
-        cursor.execute("SELECT * FROM claims WHERE employee_id = ? ORDER BY id DESC", (int(employee_id_filter),))
+        # Prepared statement with employee filter
+        cursor.execute("SELECT * FROM claims WHERE employee_id = ? ORDER BY id DESC",
+                       (int(employee_id_filter),))
     else:
         cursor.execute("SELECT * FROM claims ORDER BY id DESC")
+
     results = cursor.fetchall()
     conn.close()
+
     return [_decrypt_claim_row(row) for row in results]

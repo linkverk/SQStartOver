@@ -1,6 +1,10 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # IMPORTS
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Activity logging system imports
+#
+# External libraries: csv, datetime, pathlib, cryptography
+# ═══════════════════════════════════════════════════════════════════════════
 
 import csv
 from datetime import datetime
@@ -10,6 +14,14 @@ from cryptography.fernet import Fernet
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 1: CONSTANTS & FILE PATHS
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: File paths for logs and encryption keys
+#
+# Key components:
+# - DATA_DIR: Directory for log files
+# - LOG_FILE: Encrypted activity log CSV
+# - FERNET_KEY_FILE: Encryption key for logs
+# - LAST_CHECK_FILE: Last viewed log number (for unread count)
 # ═══════════════════════════════════════════════════════════════════════════
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -21,10 +33,29 @@ LAST_CHECK_FILE = DATA_DIR / "last_log_check.txt"
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 2: ENCRYPTION HELPERS
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Internal helper functions for log encryption/decryption
+#
+# Key components:
+# - _get_log_cipher(): Get Fernet cipher for logs
+# - _encrypt_log_content(): Encrypt log content
+# - _decrypt_log_content(): Decrypt log content
+#
+# Note: Logs must be encrypted so they are not readable by any external tool
+#       (file explorer, browser, text editor). Only readable through the
+#       system interface by Manager or Super Administrator.
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def _get_log_cipher():
-    """Get Fernet cipher for log encryption."""
+    """
+    Get Fernet cipher for log encryption.
+
+    Returns:
+        Fernet: Cipher object
+
+    Raises:
+        FileNotFoundError: If Fernet key file doesn't exist
+    """
     if not FERNET_KEY_FILE.exists():
         raise FileNotFoundError(f"Fernet key file not found at {FERNET_KEY_FILE}! Run database.py first.")
     with open(FERNET_KEY_FILE, "rb") as f:
@@ -33,13 +64,29 @@ def _get_log_cipher():
 
 
 def _encrypt_log_content(content):
-    """Encrypt log content with Fernet."""
+    """
+    Encrypt log content with Fernet.
+
+    Args:
+        content (str): Plain text log content
+
+    Returns:
+        bytes: Encrypted content
+    """
     cipher = _get_log_cipher()
     return cipher.encrypt(content.encode())
 
 
 def _decrypt_log_content(encrypted_content):
-    """Decrypt log content with Fernet."""
+    """
+    Decrypt log content with Fernet.
+
+    Args:
+        encrypted_content (bytes): Encrypted log content
+
+    Returns:
+        str: Decrypted plain text
+    """
     cipher = _get_log_cipher()
     return cipher.decrypt(encrypted_content).decode()
 
@@ -47,12 +94,32 @@ def _decrypt_log_content(encrypted_content):
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 3: LOGGING FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Core logging functionality
+#
+# Key components:
+# - log_activity(): Record encrypted activity log entry
+#
+# Log structure: No. | Date | Time | Username | Activity | Additional Info | Suspicious
+#
+# Note: All activities are logged. Suspicious activities are flagged.
+#       The system produces alerts for unread suspicious activities when
+#       a Manager or Super Administrator logs in.
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def log_activity(username, activity, additional_info="", suspicious=False):
     """
     Log an activity to encrypted log file.
-    Structure: No. | Date | Time | Username | Activity | Additional Info | Suspicious
+
+    Args:
+        username (str): Username performing action
+        activity (str): Description of activity
+        additional_info (str): Extra information (optional)
+        suspicious (bool): Flag as suspicious (default: False)
+
+    Examples:
+        log_activity("super_admin", "Logged in")
+        log_activity("unknown", "Unsuccessful login", "Wrong password", suspicious=True)
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -98,10 +165,26 @@ def log_activity(username, activity, additional_info="", suspicious=False):
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 4: LOG RETRIEVAL FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Retrieve and filter logs
+#
+# Key components:
+# - get_all_logs(): Get all decrypted logs
+# - get_suspicious_logs(): Filter suspicious activities
+# - get_unread_suspicious_count(): Count unread suspicious logs
+# - check_suspicious_activities(): Alias for unread count
+#
+# Note: Logs are decrypted on retrieval and only viewable through the
+#       system interface by Manager or Super Administrator.
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def get_all_logs():
-    """Retrieve all logs (decrypted) for admin viewing."""
+    """
+    Retrieve all logs (decrypted) for admin viewing.
+
+    Returns:
+        list: List of log dictionaries
+    """
     if not LOG_FILE.exists():
         return []
     try:
@@ -130,13 +213,26 @@ def get_all_logs():
 
 
 def get_suspicious_logs():
-    """Get only suspicious logs."""
+    """
+    Get only suspicious logs.
+
+    Returns:
+        list: List of suspicious log dictionaries
+    """
     all_logs = get_all_logs()
     return [log for log in all_logs if log["suspicious"] == "Yes"]
 
 
 def get_unread_suspicious_count():
-    """Count unread suspicious activities since last check."""
+    """
+    Count unread suspicious activities.
+
+    Produces an alert for unread suspicious activities once a
+    Manager or Super Administrator is logged in.
+
+    Returns:
+        int: Number of unread suspicious logs
+    """
     last_checked = 0
     if LAST_CHECK_FILE.exists():
         try:
@@ -150,17 +246,35 @@ def get_unread_suspicious_count():
 
 
 def check_suspicious_activities():
-    """Check for unread suspicious activities (alias)."""
+    """
+    Check for unread suspicious activities (alias for get_unread_suspicious_count).
+
+    Returns:
+        int: Number of unread suspicious activities
+    """
     return get_unread_suspicious_count()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 5: LOG MANAGEMENT FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Manage log state and display
+#
+# Key components:
+# - mark_logs_as_read(): Mark all logs as viewed
+# - clear_logs(): Delete all logs (Super Admin only)
+# - display_logs(): Format and display logs in table
+#
+# Note: Used by admin interface for log management
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def mark_logs_as_read():
-    """Mark all current logs as read."""
+    """
+    Mark all current logs as read.
+
+    Called when admin views logs. Updates last_log_check.txt with highest log number.
+    """
     logs = get_all_logs()
     if not logs:
         return
@@ -171,7 +285,12 @@ def mark_logs_as_read():
 
 
 def clear_logs():
-    """Clear all logs."""
+    """
+    Clear all logs - Super Admin only.
+
+    Returns:
+        tuple: (success, message)
+    """
     try:
         if LOG_FILE.exists():
             LOG_FILE.unlink()
@@ -183,7 +302,13 @@ def clear_logs():
 
 
 def display_logs(logs, show_suspicious_only=False):
-    """Display logs in formatted table."""
+    """
+    Display logs in formatted table.
+
+    Args:
+        logs (list): List of log dictionaries
+        show_suspicious_only (bool): Filter suspicious logs only
+    """
     if show_suspicious_only:
         logs = [log for log in logs if log["suspicious"] == "Yes"]
     if not logs:

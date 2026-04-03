@@ -1,6 +1,11 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # IMPORTS
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: User account management imports
+#
+# External modules: secrets, string (for temp password generation)
+# Internal modules: database, validation, auth, activity_log
+# ═══════════════════════════════════════════════════════════════════════════
 
 import secrets
 import string
@@ -11,12 +16,39 @@ from activity_log import log_activity
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECTION 1: USER CREATION
+# SECTION 1: USER CREATION FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Create new user accounts with role-based permissions
+#
+# Key components:
+# - create_manager(): Create Manager account (Super Admin only)
+# - create_employee_user(): Create Employee user account (Super Admin or Manager)
+#
+# Note: All new users get temporary passwords and must change on first login.
+#       Usernames are encrypted with AES-256 ECB before storage.
+#       Passwords are hashed with bcrypt (never stored in plain text).
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 def create_manager(username, first_name, last_name, password=None):
-    """Create new Manager account (Super Admin only)."""
+    """
+    Create new Manager account (Super Admin only).
+
+    Validates all inputs, uses prepared statements, hashes password with
+    bcrypt, encrypts username in database, and logs activity.
+
+    Args:
+        username (str): Username (8-10 chars)
+        first_name (str): First name
+        last_name (str): Last name
+        password (str): Password (optional, generates temporary if not provided)
+
+    Returns:
+        tuple: (success: bool, message: str, temp_password: str or None)
+
+    Example:
+        success, msg, temp_pw = create_manager("manager01", "John", "Doe")
+    """
     if not check_permission("manage_managers"):
         return False, "Access denied. Only Super Administrator can create Managers", None
 
@@ -36,21 +68,27 @@ def create_manager(username, first_name, last_name, password=None):
     conn = get_connection()
     cursor = conn.cursor()
     encrypted_username = encrypt_username(username)
+
+    # Prepared statement to prevent SQL injection
     cursor.execute("SELECT id FROM users WHERE username = ?", (encrypted_username,))
     if cursor.fetchone():
         conn.close()
         return False, f"Username '{username}' already exists", None
 
     password_hash = hash_password(password, username)
+
+    # Prepared statement for INSERT (with must_change_password flag)
     cursor.execute(
-        "INSERT INTO users (username, password_hash, role, first_name, last_name, must_change_password) VALUES (?, ?, ?, ?, ?, ?)",
+        """INSERT INTO users (username, password_hash, role, first_name, last_name, must_change_password)
+           VALUES (?, ?, ?, ?, ?, ?)""",
         (encrypted_username, password_hash, "manager", first_name, last_name, 1),
     )
     conn.commit()
     conn.close()
 
     if current_user:
-        log_activity(current_user["username"], "New manager created", f"username: {username}, name: {first_name} {last_name}")
+        log_activity(current_user["username"], "New manager created",
+                     f"username: {username}, name: {first_name} {last_name}")
 
     if temp_password:
         return True, f"Manager '{username}' created successfully", temp_password
@@ -58,7 +96,22 @@ def create_manager(username, first_name, last_name, password=None):
 
 
 def create_employee_user(username, first_name, last_name, employee_id=None, password=None):
-    """Create new Employee user account (Super Admin or Manager)."""
+    """
+    Create new Employee user account (Super Admin or Manager).
+
+    Args:
+        username (str): Username (8-10 chars)
+        first_name (str): First name
+        last_name (str): Last name
+        employee_id (int): Optional link to employees table
+        password (str): Password (optional, generates temporary if not provided)
+
+    Returns:
+        tuple: (success: bool, message: str, temp_password: str or None)
+
+    Example:
+        success, msg, temp_pw = create_employee_user("employee1", "Jane", "Smith", employee_id=1)
+    """
     if not check_permission("manage_employees"):
         return False, "Access denied. Insufficient permissions to create Employee accounts", None
 
@@ -78,21 +131,28 @@ def create_employee_user(username, first_name, last_name, employee_id=None, pass
     conn = get_connection()
     cursor = conn.cursor()
     encrypted_username = encrypt_username(username)
+
+    # Prepared statement to prevent SQL injection
     cursor.execute("SELECT id FROM users WHERE username = ?", (encrypted_username,))
     if cursor.fetchone():
         conn.close()
         return False, f"Username '{username}' already exists", None
 
     password_hash = hash_password(password, username)
+
+    # Prepared statement for INSERT
     cursor.execute(
-        "INSERT INTO users (username, password_hash, role, first_name, last_name, employee_id, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        """INSERT INTO users (username, password_hash, role, first_name, last_name,
+                              employee_id, must_change_password)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
         (encrypted_username, password_hash, "employee", first_name, last_name, employee_id, 1),
     )
     conn.commit()
     conn.close()
 
     if current_user:
-        log_activity(current_user["username"], "New employee user created", f"username: {username}, name: {first_name} {last_name}")
+        log_activity(current_user["username"], "New employee user created",
+                     f"username: {username}, name: {first_name} {last_name}")
 
     if temp_password:
         return True, f"Employee user '{username}' created successfully", temp_password
@@ -102,10 +162,35 @@ def create_employee_user(username, first_name, last_name, employee_id=None, pass
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 2: USER DELETION
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Delete user accounts with role-based permissions
+#
+# Key components:
+# - delete_user(): Delete Manager or Employee user with permission checks
+#
+# Note: Super Admin account cannot be deleted (hard-coded).
+#       Manager CAN delete their own account.
+#       Employee CANNOT delete their own account.
+#       Uses prepared statements to prevent SQL injection.
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def delete_user(username):
-    """Delete user account (role-based permissions)."""
+    """
+    Delete user account (role-based permissions).
+
+    Super Admin can delete Managers and Employee users.
+    Manager can delete Employee users AND their own account.
+    Employee cannot delete accounts.
+
+    Args:
+        username (str): Username to delete
+
+    Returns:
+        tuple: (success: bool, message: str)
+
+    Example:
+        success, msg = delete_user("old_manager")
+    """
     current_user = get_current_user()
     if not current_user:
         return False, "You must be logged in to delete users"
@@ -125,12 +210,14 @@ def delete_user(username):
             return False, "Super Administrator cannot delete their own account"
         if current_user["role"] == "employee":
             return False, "Employees cannot delete their own account"
-        # Manager CAN delete their own account
 
     conn = get_connection()
     cursor = conn.cursor()
     encrypted_username = encrypt_username(username)
-    cursor.execute("SELECT id, role, first_name, last_name FROM users WHERE username = ?", (encrypted_username,))
+
+    # Prepared statement
+    cursor.execute("SELECT id, role, first_name, last_name FROM users WHERE username = ?",
+                   (encrypted_username,))
     user = cursor.fetchone()
     if not user:
         conn.close()
@@ -138,6 +225,7 @@ def delete_user(username):
 
     user_id, target_role, first_name, last_name = user
 
+    # Permission check
     if target_role == "manager":
         if not check_permission("manage_managers"):
             conn.close()
@@ -147,21 +235,47 @@ def delete_user(username):
             conn.close()
             return False, "Access denied. Insufficient permissions to delete Employee users"
 
+    # Prepared statement for DELETE
     cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
     conn.commit()
     conn.close()
 
-    log_activity(current_user["username"], "User deleted", f"User '{username}' ({get_role_name(target_role)}) deleted")
+    log_activity(current_user["username"], "User deleted",
+                 f"User '{username}' ({get_role_name(target_role)}) deleted")
     return True, f"User '{username}' deleted successfully"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 3: PASSWORD MANAGEMENT
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Reset and manage user passwords
+#
+# Key components:
+# - reset_user_password(): Reset password to temporary (role-based permissions)
+# - _generate_temporary_password(): Helper for secure password generation (internal)
+#
+# Note: Temporary passwords meet all password requirements (12 chars,
+#       uppercase, lowercase, digit, special character). Users must change
+#       their password on first login with the temporary password.
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def reset_user_password(username):
-    """Reset user password to a temporary password."""
+    """
+    Reset user password to temporary password.
+
+    Super Admin can reset Manager and Employee passwords.
+    Manager can reset Employee passwords only.
+
+    Args:
+        username (str): Username to reset password for
+
+    Returns:
+        tuple: (success: bool, message: str, temp_password: str or None)
+
+    Example:
+        success, msg, temp_pw = reset_user_password("manager01")
+    """
     current_user = get_current_user()
     if not current_user:
         return False, "You must be logged in to reset passwords", None
@@ -177,6 +291,8 @@ def reset_user_password(username):
     conn = get_connection()
     cursor = conn.cursor()
     encrypted_username = encrypt_username(username)
+
+    # Prepared statement
     cursor.execute("SELECT id, role FROM users WHERE username = ?", (encrypted_username,))
     user = cursor.fetchone()
     if not user:
@@ -185,6 +301,7 @@ def reset_user_password(username):
 
     user_id, target_role = user
 
+    # Permission check
     if target_role == "manager":
         if not check_permission("manage_managers"):
             conn.close()
@@ -196,16 +313,33 @@ def reset_user_password(username):
 
     temp_password = _generate_temporary_password()
     new_password_hash = hash_password(temp_password, username)
-    cursor.execute("UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?", (new_password_hash, user_id))
+
+    # Prepared statement for UPDATE
+    cursor.execute("UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?",
+                   (new_password_hash, user_id))
     conn.commit()
     conn.close()
 
-    log_activity(current_user["username"], "Password reset", f"For user: {username} ({get_role_name(target_role)})")
+    log_activity(current_user["username"], "Password reset",
+                 f"For user: {username} ({get_role_name(target_role)})")
     return True, f"Password reset successfully for '{username}'", temp_password
 
 
 def _generate_temporary_password():
-    """Generate secure temporary password (12 chars, meets all requirements)."""
+    """
+    Generate secure temporary password.
+
+    Requirements (matches validate_password):
+    - 12 characters
+    - Includes uppercase, lowercase, digits, special characters
+
+    Returns:
+        str: Temporary password
+
+    Example:
+        temp_pw = _generate_temporary_password()
+        # Returns something like: "Xk9#mPq2Rw!n"
+    """
     password_chars = [
         secrets.choice(string.ascii_uppercase),
         secrets.choice(string.ascii_lowercase),
@@ -222,10 +356,34 @@ def _generate_temporary_password():
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 4: PROFILE UPDATES
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Update user profile information (first name, last name)
+#
+# Key components:
+# - update_user_profile(): Update name fields with role-based permissions
+#
+# Note: Only first_name and last_name can be updated via this function.
+#       Profile contains first name, last name, and registration date (Note 1).
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def update_user_profile(username, first_name=None, last_name=None):
-    """Update user profile (first name, last name)."""
+    """
+    Update user profile (first name, last name).
+
+    Super Admin can update any Manager profile.
+    Manager can update Employee profiles.
+
+    Args:
+        username (str): Username to update
+        first_name (str): New first name (optional)
+        last_name (str): New last name (optional)
+
+    Returns:
+        tuple: (success: bool, message: str)
+
+    Example:
+        success, msg = update_user_profile("manager01", first_name="Johnny")
+    """
     current_user = get_current_user()
     if not current_user:
         return False, "You must be logged in to update user profiles"
@@ -249,7 +407,10 @@ def update_user_profile(username, first_name=None, last_name=None):
     conn = get_connection()
     cursor = conn.cursor()
     encrypted_username = encrypt_username(username)
-    cursor.execute("SELECT id, role, first_name, last_name FROM users WHERE username = ?", (encrypted_username,))
+
+    # Prepared statement
+    cursor.execute("SELECT id, role, first_name, last_name FROM users WHERE username = ?",
+                   (encrypted_username,))
     user = cursor.fetchone()
     if not user:
         conn.close()
@@ -257,6 +418,7 @@ def update_user_profile(username, first_name=None, last_name=None):
 
     user_id, target_role, old_first_name, old_last_name = user
 
+    # Permission check
     if target_role == "manager":
         if not check_permission("manage_managers"):
             conn.close()
@@ -266,6 +428,7 @@ def update_user_profile(username, first_name=None, last_name=None):
             conn.close()
             return False, "Access denied. Insufficient permissions to update Employee profiles"
 
+    # Build prepared statement dynamically
     update_fields = []
     params = []
     if first_name is not None:
@@ -276,6 +439,7 @@ def update_user_profile(username, first_name=None, last_name=None):
         params.append(last_name)
     params.append(user_id)
 
+    # Prepared statement for UPDATE
     cursor.execute(f"UPDATE users SET {', '.join(update_fields)} WHERE id = ?", tuple(params))
     conn.commit()
     conn.close()
@@ -286,20 +450,43 @@ def update_user_profile(username, first_name=None, last_name=None):
     if last_name is not None:
         changes.append(f"last_name: '{old_last_name}' → '{last_name}'")
 
-    log_activity(current_user["username"], "User profile updated", f"User: {username}, Changes: {', '.join(changes)}")
+    log_activity(current_user["username"], "User profile updated",
+                 f"User: {username}, Changes: {', '.join(changes)}")
     return True, f"Profile updated successfully for '{username}'"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECTION 5: USER LISTING
+# SECTION 5: USER LISTING & RETRIEVAL
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: List and retrieve user information
+#
+# Key components:
+# - list_all_users(): Get all users with role information (decrypted usernames)
+#
+# Note: Usernames are decrypted from AES-256 ECB on retrieval.
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 def list_all_users():
-    """List all users with their roles."""
+    """
+    Display all users with their roles.
+
+    Returns:
+        list: List of user dictionaries with decrypted usernames
+
+    Example:
+        users = list_all_users()
+        for user in users:
+            print(f"{user['username']} - {user['role_name']}")
+    """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT username, role, first_name, last_name, created_at FROM users ORDER BY created_at DESC")
+
+    # Proper SQL query
+    cursor.execute(
+        """SELECT username, role, first_name, last_name, created_at
+           FROM users ORDER BY created_at DESC"""
+    )
     results = cursor.fetchall()
     conn.close()
 

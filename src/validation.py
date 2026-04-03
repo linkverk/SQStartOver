@@ -1,6 +1,13 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # IMPORTS
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Input validation libraries
+#
+# External libraries:
+# - re: Regular expressions for format validation
+# - datetime: Date validation and range checking
+# - activity_log: Security monitoring for null-byte attacks
+# ═══════════════════════════════════════════════════════════════════════════
 
 import re
 from datetime import datetime, timedelta
@@ -9,6 +16,11 @@ from activity_log import log_activity
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 1: CUSTOM EXCEPTIONS
+# ═══════════════════════════════════════════════════════════════════════════
+# Description: Custom exception for validation errors
+#
+# Key components:
+# - ValidationError: Raised when input validation fails
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -20,10 +32,28 @@ class ValidationError(Exception):
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 2: HELPER FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Internal helper functions for validation
+#
+# Key components:
+# - _check_null_bytes(): Check for null bytes in string input
+#
+# Note: Null bytes should never be present in non-binary input and can
+#       indicate attack attempts (null-byte injection). All validators
+#       call this function before processing input.
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def _check_null_bytes(value, field_name):
-    """Check for null bytes in string input (null-byte injection protection)."""
+    """
+    Check for null bytes in string input (null-byte injection protection).
+
+    Args:
+        value: The value to check
+        field_name (str): Name of the field being validated (for logging)
+
+    Raises:
+        ValidationError: If null byte is detected
+    """
     if isinstance(value, str) and "\0" in value:
         log_activity(
             username="SYSTEM",
@@ -37,21 +67,42 @@ def _check_null_bytes(value, field_name):
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 3: USER CREDENTIAL VALIDATION
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Validate username and password formats
+#
+# Key components:
+# - validate_username(): 8-10 chars, specific character rules, case-insensitive
+# - validate_password(): 12-50 chars, complexity requirements
+#
+# Username rules:
+# - Must be unique, 8-10 characters (except super_admin)
+# - Must start with letter or underscore
+# - Can contain: a-z, 0-9, _, ', .
+# - Case-insensitive (stored as lowercase)
+#
+# Password rules:
+# - 12-50 characters
+# - At least 1 lowercase, 1 uppercase, 1 digit, 1 special character
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def validate_username(username):
     """
     Validate username format.
-    Rules: 8-10 chars, start with letter or _, contain a-z 0-9 _ ' .
-    Case-insensitive. super_admin bypasses length check.
+
+    Args:
+        username (str): Username to validate
+
+    Returns:
+        str: Validated username (lowercase)
+
+    Raises:
+        ValidationError: If username is invalid
     """
     if not isinstance(username, str):
         raise ValidationError("Username must be a string")
     _check_null_bytes(username, "Username")
-
     username = username.lower().strip()
 
-    # Allow super_admin system account
     if username == "super_admin":
         return username
 
@@ -69,7 +120,15 @@ def validate_username(username):
 def validate_password(password):
     """
     Validate password strength.
-    Rules: 12-50 chars, 1 lowercase, 1 uppercase, 1 digit, 1 special char.
+
+    Args:
+        password (str): Password to validate
+
+    Returns:
+        str: Validated password (unchanged)
+
+    Raises:
+        ValidationError: If password is invalid
     """
     if not isinstance(password, str):
         raise ValidationError("Password must be a string")
@@ -93,10 +152,29 @@ def validate_password(password):
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 4: CONTACT INFORMATION VALIDATION
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Validate email and phone number formats
+#
+# Key components:
+# - validate_email(): RFC-compliant email format, max 50 chars
+# - validate_phone(): Dutch mobile format (+31-6-DDDDDDDD)
+#
+# Note: Phone numbers accept 8 digits and auto-format to +31-6-DDDDDDDD
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def validate_email(email):
-    """Validate email format. Max 50 chars, pattern: user@domain.tld"""
+    """
+    Validate email format.
+
+    Args:
+        email (str): Email to validate
+
+    Returns:
+        str: Validated email (lowercase)
+
+    Raises:
+        ValidationError: If email is invalid
+    """
     if not isinstance(email, str):
         raise ValidationError("Email must be a string")
     _check_null_bytes(email, "Email")
@@ -111,15 +189,24 @@ def validate_email(email):
 
 def validate_phone(phone):
     """
-    Validate Dutch mobile phone number.
-    Accepts 8 digits or already formatted +31-6-DDDDDDDD.
-    Returns formatted: +31-6-DDDDDDDD
+    Validate and format Dutch mobile phone number.
+
+    Accepts 8 digits (DDDDDDDD) or already formatted (+31-6-DDDDDDDD).
+    Output: +31-6-DDDDDDDD
+
+    Args:
+        phone (str): Phone number
+
+    Returns:
+        str: Formatted phone (+31-6-DDDDDDDD)
+
+    Raises:
+        ValidationError: If phone is invalid
     """
     if not isinstance(phone, str):
         raise ValidationError("Phone number must be a string")
     _check_null_bytes(phone, "Phone")
     phone = phone.strip()
-
     if re.match(r"^\+31-6-\d{8}$", phone):
         return phone
     if not re.match(r"^\d{8}$", phone):
@@ -130,10 +217,31 @@ def validate_phone(phone):
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 5: ADDRESS VALIDATION
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Validate address components (Dutch format)
+#
+# Key components:
+# - validate_zipcode(): Dutch postal code (DDDDXX format)
+# - validate_house_number(): House number (digits only per assignment)
+# - validate_city(): City from predefined list of 10 cities
+#
+# Note: ZIP code format is DDDDXX (4 digits + 2 uppercase letters).
+#       House numbers are digits only per assignment Table 3/4.
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def validate_zipcode(zipcode):
-    """Validate Dutch zipcode: DDDDXX (4 digits + 2 uppercase letters)."""
+    """
+    Validate Dutch zipcode format: DDDDXX (4 digits + 2 letters).
+
+    Args:
+        zipcode (str): Zipcode to validate
+
+    Returns:
+        str: Validated zipcode in UPPERCASE format
+
+    Raises:
+        ValidationError: If zipcode is invalid
+    """
     if not isinstance(zipcode, str):
         raise ValidationError("Zipcode must be a string")
     _check_null_bytes(zipcode, "Zipcode")
@@ -144,7 +252,18 @@ def validate_zipcode(zipcode):
 
 
 def validate_house_number(house_number):
-    """Validate house number: digits only."""
+    """
+    Validate house number: digits only.
+
+    Args:
+        house_number (str): House number to validate
+
+    Returns:
+        str: Validated house number
+
+    Raises:
+        ValidationError: If house number is invalid
+    """
     if not isinstance(house_number, str):
         raise ValidationError("House number must be a string")
     _check_null_bytes(house_number, "House number")
@@ -157,21 +276,24 @@ def validate_house_number(house_number):
 
 
 VALID_CITIES = [
-    "Amsterdam",
-    "Rotterdam",
-    "Utrecht",
-    "Den Haag",
-    "Eindhoven",
-    "Groningen",
-    "Tilburg",
-    "Almere",
-    "Breda",
-    "Nijmegen",
+    "Amsterdam", "Rotterdam", "Utrecht", "Den Haag", "Eindhoven",
+    "Groningen", "Tilburg", "Almere", "Breda", "Nijmegen",
 ]
 
 
 def validate_city(city):
-    """Validate city against predefined list of 10 Dutch cities."""
+    """
+    Validate city against predefined list of 10 Dutch cities.
+
+    Args:
+        city (str): City to validate
+
+    Returns:
+        str: Validated city
+
+    Raises:
+        ValidationError: If city is not in predefined list
+    """
     if not isinstance(city, str):
         raise ValidationError("City must be a string")
     _check_null_bytes(city, "City")
@@ -184,10 +306,36 @@ def validate_city(city):
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 6: PERSONAL INFORMATION VALIDATION
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Validate personal data (names, dates, gender, identity documents)
+#
+# Key components:
+# - validate_name(): Names and street names (letters, spaces, hyphens, apostrophes)
+# - validate_birthday(): Date in DD-MM-YYYY format with calendar validation
+# - validate_gender(): Male or Female
+# - validate_identity_doc_type(): Passport or ID-Card
+# - validate_identity_doc_number(): XXDDDDDDD or XDDDDDDDD format
+# - validate_bsn(): BSN number (exactly 9 digits)
+#
+# Note: Identity document formats per assignment Table 2.
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def validate_name(name, field_name="Name"):
-    """Validate names: 1-50 chars, letters/spaces/hyphens/apostrophes."""
+    """
+    Validate names (first name, last name, street name).
+
+    Rules: 1-50 characters, only letters, spaces, hyphens, apostrophes.
+
+    Args:
+        name (str): Name to validate
+        field_name (str): Field name for error messages
+
+    Returns:
+        str: Validated name
+
+    Raises:
+        ValidationError: If name is invalid
+    """
     if not isinstance(name, str):
         raise ValidationError(f"{field_name} must be a string")
     _check_null_bytes(name, field_name)
@@ -202,7 +350,18 @@ def validate_name(name, field_name="Name"):
 
 
 def validate_birthday(date_str):
-    """Validate birthday: DD-MM-YYYY format, valid calendar date, not future, not >150 years ago."""
+    """
+    Validate birthday format (DD-MM-YYYY) and check valid calendar date.
+
+    Args:
+        date_str (str): Birthday date string
+
+    Returns:
+        str: Validated birthday (DD-MM-YYYY)
+
+    Raises:
+        ValidationError: If birthday is invalid or in the future
+    """
     if not isinstance(date_str, str):
         raise ValidationError("Birthday must be a string")
     _check_null_bytes(date_str, "Birthday")
@@ -224,7 +383,18 @@ def validate_birthday(date_str):
 
 
 def validate_gender(gender):
-    """Validate gender: Male or Female."""
+    """
+    Validate gender value: Male or Female.
+
+    Args:
+        gender (str): Gender to validate
+
+    Returns:
+        str: Validated gender
+
+    Raises:
+        ValidationError: If gender is invalid
+    """
     if not isinstance(gender, str):
         raise ValidationError("Gender must be a string")
     _check_null_bytes(gender, "Gender")
@@ -235,7 +405,18 @@ def validate_gender(gender):
 
 
 def validate_identity_doc_type(doc_type):
-    """Validate identity document type: Passport or ID-Card."""
+    """
+    Validate identity document type: Passport or ID-Card.
+
+    Args:
+        doc_type (str): Document type to validate
+
+    Returns:
+        str: Validated document type
+
+    Raises:
+        ValidationError: If document type is invalid
+    """
     if not isinstance(doc_type, str):
         raise ValidationError("Identity document type must be a string")
     _check_null_bytes(doc_type, "Identity document type")
@@ -248,7 +429,17 @@ def validate_identity_doc_type(doc_type):
 def validate_identity_doc_number(doc_number):
     """
     Validate identity document number.
+
     Format: XXDDDDDDD (2 letters + 7 digits) or XDDDDDDDD (1 letter + 8 digits).
+
+    Args:
+        doc_number (str): Document number to validate
+
+    Returns:
+        str: Validated document number (uppercase)
+
+    Raises:
+        ValidationError: If document number is invalid
     """
     if not isinstance(doc_number, str):
         raise ValidationError("Identity document number must be a string")
@@ -260,7 +451,18 @@ def validate_identity_doc_number(doc_number):
 
 
 def validate_bsn(bsn):
-    """Validate BSN (Burger Service Nummer): exactly 9 digits."""
+    """
+    Validate BSN (Burger Service Nummer): exactly 9 digits.
+
+    Args:
+        bsn (str): BSN to validate
+
+    Returns:
+        str: Validated BSN
+
+    Raises:
+        ValidationError: If BSN is invalid
+    """
     if not isinstance(bsn, str):
         raise ValidationError("BSN must be a string")
     _check_null_bytes(bsn, "BSN")
@@ -273,12 +475,35 @@ def validate_bsn(bsn):
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 7: CLAIM VALIDATION
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: Validate expense claim data
+#
+# Key components:
+# - validate_claim_date(): ISO 8601 (YYYY-MM-DD), max 2 months back / 14 days ahead
+# - validate_project_number(): 2-10 digit characters
+# - validate_claim_type(): Travel or Home Office
+# - validate_travel_distance(): Positive digits (km)
+# - validate_salary_batch(): YYYY-MM format
+# - validate_approval_status(): Pending, Approved, or Rejected
+# - validate_employee_id(): Positive digits
+#
+# Note: Claim date range is relative to current system date per assignment.
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def validate_claim_date(date_str):
     """
     Validate claim date in ISO 8601 format (YYYY-MM-DD).
+
     Must not be older than 2 months or more than 14 days in the future.
+
+    Args:
+        date_str (str): Claim date string
+
+    Returns:
+        str: Validated claim date
+
+    Raises:
+        ValidationError: If claim date is invalid or out of range
     """
     if not isinstance(date_str, str):
         raise ValidationError("Claim date must be a string")
@@ -304,7 +529,18 @@ def validate_claim_date(date_str):
 
 
 def validate_project_number(project_number):
-    """Validate project number: 2-10 digit characters."""
+    """
+    Validate project number: 2-10 digit characters.
+
+    Args:
+        project_number (str): Project number to validate
+
+    Returns:
+        str: Validated project number
+
+    Raises:
+        ValidationError: If project number is invalid
+    """
     if not isinstance(project_number, str):
         raise ValidationError("Project number must be a string")
     _check_null_bytes(project_number, "Project number")
@@ -315,7 +551,18 @@ def validate_project_number(project_number):
 
 
 def validate_claim_type(claim_type):
-    """Validate claim type: Travel or Home Office."""
+    """
+    Validate claim type: Travel or Home Office.
+
+    Args:
+        claim_type (str): Claim type to validate
+
+    Returns:
+        str: Validated claim type
+
+    Raises:
+        ValidationError: If claim type is invalid
+    """
     if not isinstance(claim_type, str):
         raise ValidationError("Claim type must be a string")
     _check_null_bytes(claim_type, "Claim type")
@@ -326,7 +573,18 @@ def validate_claim_type(claim_type):
 
 
 def validate_travel_distance(distance):
-    """Validate travel distance: positive digits."""
+    """
+    Validate travel distance: positive digits.
+
+    Args:
+        distance (str): Travel distance in km
+
+    Returns:
+        str: Validated travel distance
+
+    Raises:
+        ValidationError: If travel distance is invalid
+    """
     if not isinstance(distance, str):
         raise ValidationError("Travel distance must be a string")
     _check_null_bytes(distance, "Travel distance")
@@ -339,7 +597,18 @@ def validate_travel_distance(distance):
 
 
 def validate_salary_batch(batch):
-    """Validate salary batch: YYYY-MM format."""
+    """
+    Validate salary batch: YYYY-MM format.
+
+    Args:
+        batch (str): Salary batch identifier
+
+    Returns:
+        str: Validated salary batch
+
+    Raises:
+        ValidationError: If salary batch format is invalid
+    """
     if not isinstance(batch, str):
         raise ValidationError("Salary batch must be a string")
     _check_null_bytes(batch, "Salary batch")
@@ -356,7 +625,18 @@ def validate_salary_batch(batch):
 
 
 def validate_approval_status(status):
-    """Validate approval status: Pending, Approved, or Rejected."""
+    """
+    Validate approval status: Pending, Approved, or Rejected.
+
+    Args:
+        status (str): Approval status
+
+    Returns:
+        str: Validated status
+
+    Raises:
+        ValidationError: If status is invalid
+    """
     if not isinstance(status, str):
         raise ValidationError("Approval status must be a string")
     _check_null_bytes(status, "Approval status")
@@ -367,7 +647,18 @@ def validate_approval_status(status):
 
 
 def validate_employee_id(emp_id):
-    """Validate employee ID: 2-10 digit characters."""
+    """
+    Validate employee ID: digits only.
+
+    Args:
+        emp_id (str): Employee ID
+
+    Returns:
+        str: Validated employee ID
+
+    Raises:
+        ValidationError: If employee ID is invalid
+    """
     if not isinstance(emp_id, str):
         raise ValidationError("Employee ID must be a string")
     _check_null_bytes(emp_id, "Employee ID")
@@ -380,17 +671,45 @@ def validate_employee_id(emp_id):
 # ═══════════════════════════════════════════════════════════════════════════
 # SECTION 8: GENERAL VALIDATORS
 # ═══════════════════════════════════════════════════════════════════════════
+# Description: General-purpose validation helpers
+#
+# Key components:
+# - validate_nonempty(): Ensure input is not empty (for lookup fields)
+# - validate_date(): Date in ISO YYYY-MM-DD format (general purpose)
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def validate_nonempty(value):
-    """Validate that input is not empty."""
+    """
+    Validate that input is not empty.
+
+    Args:
+        value (str): The raw user input
+
+    Returns:
+        str: The input unchanged (stripped)
+
+    Raises:
+        ValidationError: If value is empty
+    """
     if not isinstance(value, str) or not value.strip():
         raise ValidationError("Input cannot be empty")
     return value.strip()
 
 
 def validate_date(date_str):
-    """Validate date in ISO YYYY-MM-DD format."""
+    """
+    Validate date in ISO YYYY-MM-DD format.
+
+    Args:
+        date_str (str): Date string
+
+    Returns:
+        str: Validated date
+
+    Raises:
+        ValidationError: If date is invalid
+    """
     if not isinstance(date_str, str):
         raise ValidationError("Date must be a string")
     _check_null_bytes(date_str, "Date")
